@@ -92,3 +92,42 @@ if __name__ == "__main__":
     # Path to the image file you want to analyze
     image_path = "path/to/your/diagram.png"
     convert_diagram_to_uml(image_path)
+    
+    
+import requests
+import os
+import json
+
+# Azure OpenAI API settings
+AZURE_OPENAI_ENDPOINT = "https://<your-openai-endpoint>.openai.azure.com/"
+AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
+
+# Description of your diagram in textual form
+diagram_description = """
+Describe the diagram here. For example:
+There are three classes: User, Product, and Order. User has attributes username and password and methods login() and logout(). Product has attributes name and price. Order connects User and Product indicating which user ordered which product.
+"""
+
+def call_openai_gpt_to_generate_uml(description):
+    headers = {
+        'Authorization': f'Bearer {AZURE_OPENAI_KEY}',
+        'Content-Type': 'application/json'
+    }
+
+    data = {
+        "model": "gpt-4.0-turbo",
+        "prompt": f"Convert the following diagram description into a UML class diagram:\n{description}",
+        "max_tokens": 200
+    }
+
+    response = requests.post(f"{AZURE_OPENAI_ENDPOINT}v1/completions", headers=headers, json=data)
+    if response.status_code == 200:
+        uml_description = response.json()['choices'][0]['text']
+        print("Generated UML Description:", uml_description)
+        return uml_description
+    else:
+        print("Failed to generate UML:", response.text)
+        return None
+
+if __name__ == "__main__":
+    uml_description = call_openai_gpt_to_generate_uml(diagram_description)
