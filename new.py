@@ -20,7 +20,7 @@ def get_authorization_code():
     # Paste that URL here:
     redirect_response = input('Paste the full redirect URL here: ')
 
-    # Extract the authorization code from the redirect URL
+    # Exchange authorization code for an access token
     token = oauth.fetch_token(token_url, authorization_response=redirect_response)
     return token['access_token']
 
