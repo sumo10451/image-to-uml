@@ -33,6 +33,7 @@ def get_tech_publisher_id(publisher_name, api_url, headers):
                         node {
                             id
                             name
+                            deleted
                         }
                         cursor
                     }
@@ -52,8 +53,9 @@ def get_tech_publisher_id(publisher_name, api_url, headers):
         response_data = response.json()
 
         for edge in response_data['data']['techPublishers']['edges']:
-            if edge['node']['name'] == publisher_name:
-                tech_publisher_id = edge['node']['id']
+            node = edge['node']
+            if node['name'] == publisher_name and not node['deleted']:
+                tech_publisher_id = node['id']
                 break
 
         if tech_publisher_id or not response_data['data']['techPublishers']['pageInfo']['hasNextPage']:
