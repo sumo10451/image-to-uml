@@ -1,88 +1,106 @@
-import pandas as pd
+import base64
+import hashlib
+import os
 import requests
-from requests_oauthlib import OAuth2Session
+import pandas as pd
 
-# OAuth Configuration
+# OAuth and GraphQL details
 client_id = 'your_client_id'
-authorization_base_url = 'https://your-oauth-provider.com/auth'
-token_url = 'https://your-oauth-provider.com/token'
-redirect_uri = 'https://your-redirect-uri.com/callback'
-scope = ['your_scope']  # e.g., ['read', 'write']
-graphql_url = 'https://your-graphql-api.com/graphql'
+authorization_url = 'your_authorization_url'
+token_url = 'your_token_url'
+scope = 'your_scope'
+redirect_uri = 'https://localhost:8010'
+graphql_url = 'your_graphql_url'
+csv_file = 'path_to_your_csv_file.csv'
+client_secret = 'your_client_secret'  # if applicable
 
-# Step 1: Redirect user to OAuth provider for authorization
-def get_authorization_code():
-    oauth = OAuth2Session(client_id, scope=scope, redirect_uri=redirect_uri)
-    authorization_url, state = oauth.authorization_url(authorization_base_url)
+# Step 1: Generate a code verifier and code challenge
+def generate_code_verifier():
+    return base64.urlsafe_b64encode(os.urandom(32)).decode('utf-8').rstrip('=')
 
-    print('Please go to this URL and authorize access:', authorization_url)
-    # The user will get redirected to a URL with an authorization code after authorization
-    # Paste that URL here:
-    redirect_response = input('Paste the full redirect URL here: ')
+def generate_code_challenge(verifier):
+    code_challenge_digest = hashlib.sha256(verifier.encode('utf-8')).digest()
+    return base64.urlsafe_b64encode(code_challenge_digest).decode('utf-8').rstrip('=')
 
-    # Exchange authorization code for an access token
-    token = oauth.fetch_token(token_url, authorization_response=redirect_response)
-    return token['access_token']
+# Step 2: Get the authorization code with PKCE
+code_verifier = generate_code_verifier()
+code_challenge = generate_code_challenge(code_verifier)
 
-# Test GraphQL connection with a simple query
-def test_graphql_connection(token):
-    test_query = """
-    query {
-        __schema {
-            queryType {
-                name
-            }
-        }
+# Step 3: Authorize the app
+auth_response = requests.get(
+    authorization_url,
+    params={
+        'response_type': 'code',
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'scope': scope,
+        'code_challenge': code_challenge,
+        'code_challenge_method': 'S256'
     }
-    """
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-    response = requests.post(graphql_url, json={'query': test_query}, headers=headers)
-    return response.status_code, response.json()
+)
+print("Go to the following URL to authorize the application:")
+print(auth_response.url)
 
-# Read CSV file
-def read_csv(file_path):
-    df = pd.read_csv(file_path)
-    return df
+# Step 4: After the user authorizes, they will be redirected with an authorization code
+authorization_code = input("Enter the authorization code from the redirected URL: ")
 
-# Create GraphQL mutation based on CSV row
-def create_graphql_mutation(row):
-    mutation = """
-    mutation {
-        createRecord(input: {
-            field1: "%s",
-            field2: "%s",
-            field3: "%s"
-        }) {
-            id
-        }
+# Step 5: Exchange authorization code for access token
+token_response = requests.post(
+    token_url,
+    data={
+        'grant_type': 'authorization_code',
+        'code': authorization_code,
+        'redirect_uri': redirect_uri,
+        'client_id': client_id,
+        'code_verifier': code_verifier,
+        'client_secret': client_secret  # if required by your OAuth provider
     }
-    """ % (row['field1'], row['field2'], row['field3'])
-    return mutation
+)
+token_data = token_response.json()
+access_token = token_data.get('access_token')
 
-# Send mutation request to GraphQL API
-def send_graphql_request(mutation, token):
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-    response = requests.post(graphql_url, json={'query': mutation}, headers=headers)
-    return response.json()
+if not access_token:
+    raise Exception(f"Failed to get access token: {token_data}")
 
-# Main function
-def main():
-    token = get_authorization_code()
+print(f"Access token: {access_token}")
 
-    # Test connection
-    status_code, response = test_graphql_connection(token)
-    if status_code == 200:
-        print("Connection successful:", response)
-    else:
-        print("Connection failed:", response)
-        return
+# Step 6: Read CSV file and prepare GraphQL mutation
+df = pd.read_csv(csv_file)
 
-    # Proceed with mutation if the connection is successful
-    csv_data = read_csv('your_file.csv')
-    for _, row in csv_data.iterrows():
-        mutation = create_graphql_mutation(row)
-        response = send_graphql_request(mutation, token)
-        print(response)
+mutation_template = """
+mutation($input: YourInputType!) {
+    createItem(input: $input) {
+        id
+        status
+    }
+}
+"""
 
-if __name__ == '__main__':
-    main()
+headers = {
+    'Authorization': f'Bearer {access_token}',
+    'Content-Type': 'application/json'
+}
+
+# Step 7: Send mutations to GraphQL API
+for index, row in df.iterrows():
+    # Prepare the input data for the mutation based on CSV columns
+    input_data = {
+        "field1": row['column1'],
+        "field2": row['column2'],
+        # Add more fields as per your GraphQL mutation requirements
+    }
+
+    response = requests.post(
+        graphql_url,
+        json={
+            'query': mutation_template,
+            'variables': {'input': input_data}
+        },
+        headers=headers
+    )
+
+    result = response.json()
+    print(result)
+
+    if 'errors' in result:
+        print(f"Error for row {index}: {result['errors']}")
