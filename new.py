@@ -1,26 +1,54 @@
+import pandas as pd
 import requests
-from requests.auth import HTTPBasicAuth
+from requests_oauthlib import OAuth2Session
 
-# Replace with your Azure DevOps organization URL, project name, and personal access token (PAT)
-organization_url = "https://dev.azure.com/{organization}"
-project = "{project}"
-ticket_number = "{work_item_id}"  # Replace with your actual work item (ticket) number
-personal_access_token = "your_pat_here"  # Replace with your actual PAT
+# OAuth Configuration
+client_id = 'your_client_id'
+client_secret = 'your_client_secret'
+token_url = 'https://your-oauth-provider.com/token'
+graphql_url = 'https://your-graphql-api.com/graphql'
 
-# API URL to get work item details
-url = f"{organization_url}/{project}/_apis/wit/workitems/{ticket_number}?api-version=7.0"
+# Fetch OAuth token
+def get_oauth_token():
+    oauth = OAuth2Session(client_id)
+    token = oauth.fetch_token(token_url=token_url, client_id=client_id, client_secret=client_secret)
+    return token['access_token']
 
-# Make the request
-response = requests.get(url, auth=HTTPBasicAuth('', personal_access_token))
+# Read CSV file
+def read_csv(file_path):
+    df = pd.read_csv(file_path)
+    return df
 
-# Check if the request was successful
-if response.status_code == 200:
-    # Print the work item details
-    work_item = response.json()
-    print("Ticket Information:")
-    print(f"ID: {work_item['id']}")
-    print(f"Title: {work_item['fields']['System.Title']}")
-    print(f"State: {work_item['fields']['System.State']}")
-    print(f"Assigned To: {work_item['fields'].get('System.AssignedTo', {}).get('displayName', 'Unassigned')}")
-else:
-    print(f"Failed to get work item. Status code: {response.status_code}, Message: {response.text}")
+# Create GraphQL mutation based on CSV row
+def create_graphql_mutation(row):
+    mutation = """
+    mutation {
+        createRecord(input: {
+            field1: "%s",
+            field2: "%s",
+            field3: "%s"
+        }) {
+            id
+        }
+    }
+    """ % (row['field1'], row['field2'], row['field3'])
+    return mutation
+
+# Send mutation request to GraphQL API
+def send_graphql_request(mutation, token):
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    response = requests.post(graphql_url, json={'query': mutation}, headers=headers)
+    return response.json()
+
+# Main function
+def main():
+    token = get_oauth_token()
+    csv_data = read_csv('your_file.csv')
+
+    for _, row in csv_data.iterrows():
+        mutation = create_graphql_mutation(row)
+        response = send_graphql_request(mutation, token)
+        print(response)
+
+if __name__ == '__main__':
+    main()
