@@ -1,126 +1,133 @@
-from flask import Flask, request, jsonify, redirect
-from ariadne import QueryType, MutationType, make_executable_schema, graphql_sync, load_schema_from_path
-from ariadne.constants import PLAYGROUND_HTML
-import base64
-import hashlib
-import os
+import openpyxl
 import requests
+import json
 
-# OAuth and GraphQL details
-client_id = 'your_client_id'
-authorization_url = 'your_authorization_url'
-token_url = 'your_token_url'
-scope = 'your_scope'
-redirect_uri = 'https://localhost:8010'  # Use root redirect URI
-client_secret = 'your_client_secret'  # if applicable
+# Load the Excel file
+def load_excel(file_path):
+    workbook = openpyxl.load_workbook(file_path)
+    sheet = workbook.active
+    data = []
+    for row in sheet.iter_rows(min_row=2, values_only=True):  # Skipping the header row
+        data.append({
+            'name': row[0],
+            'description': row[1],
+            'versionSpec': row[2],
+            'publisherName': row[3],
+        })
+    return data
 
-# Flask app setup
-app = Flask(__name__)
-
-# PKCE variables
-code_verifier = ''
-code_challenge = ''
-
-# Step 1: Generate PKCE code verifier and challenge
-def generate_code_verifier():
-    return base64.urlsafe_b64encode(os.urandom(32)).decode('utf-8').rstrip('=')
-
-def generate_code_challenge(verifier):
-    code_challenge_digest = hashlib.sha256(verifier.encode('utf-8')).digest()
-    return base64.urlsafe_b64encode(code_challenge_digest).decode('utf-8').rstrip('=')
-
-@app.route('/')
-def index():
-    global code_verifier, code_challenge
-
-    # If this is the callback from OAuth (authorization code present)
-    authorization_code = request.args.get('code')
-
-    if authorization_code:
-        # Exchange authorization code for access token using PKCE
-        token_response = requests.post(
-            token_url,
-            data={
-                'grant_type': 'authorization_code',
-                'code': authorization_code,
-                'redirect_uri': redirect_uri,
-                'client_id': client_id,
-                'code_verifier': code_verifier,
-                'client_secret': client_secret  # if required
+# Get the tech publisher ID based on the publisher name
+def get_tech_publisher_id(publisher_name, api_url, headers):
+    tech_publisher_id = None
+    cursor = None
+    while True:
+        query = {
+            "query": """
+            query ListTechPublishers($first: Int!, $cursor: String) {
+                techPublishers(
+                    after: $cursor
+                    first: $first
+                    order: { name: ASC }
+                ) {
+                    edges {
+                        node {
+                            id
+                            name
+                        }
+                        cursor
+                    }
+                    pageInfo {
+                        hasNextPage
+                        endCursor
+                    }
+                }
             }
-        )
+            """,
+            "variables": {
+                "first": 100,
+                "cursor": cursor
+            }
+        }
+        response = requests.post(api_url, headers=headers, json=query)
+        response_data = response.json()
 
-        token_data = token_response.json()
-        access_token = token_data.get('access_token')
+        for edge in response_data['data']['techPublishers']['edges']:
+            if edge['node']['name'] == publisher_name:
+                tech_publisher_id = edge['node']['id']
+                break
 
-        if not access_token:
-            return f"Failed to get access token: {token_data}", 400
+        if tech_publisher_id or not response_data['data']['techPublishers']['pageInfo']['hasNextPage']:
+            break
+        cursor = response_data['data']['techPublishers']['pageInfo']['endCursor']
+    
+    return tech_publisher_id
 
-        return f"Access token: {access_token}"
+# Create a new tech publisher
+def create_tech_publisher(publisher_name, api_url, headers):
+    mutation = {
+        "query": """
+        mutation createTechPublisher {
+            createTechPublisher(request: {
+                name: \"%s\"
+                description: \"N/A\"
+            }) {
+                id
+                name
+                description
+            }
+        }
+        """ % publisher_name
+    }
+    response = requests.post(api_url, headers=headers, json=mutation)
+    response_data = response.json()
+    return response_data['data']['createTechPublisher']['id'] if 'data' in response_data else None
 
-    else:
-        # OAuth login process: Generate code verifier and challenge
-        code_verifier = generate_code_verifier()
-        code_challenge = generate_code_challenge(code_verifier)
+# Create technology mutation
+def create_technology(technology_data, tech_publisher_id, api_url, headers):
+    mutation = {
+        "query": """
+        mutation createTechnology {
+            createTechnology(request: {
+                name: \"%s\"
+                description: \"%s\"
+                versionSpec: \"%s\"
+                techPublishers: {techPublisherId: \"%s\"}
+            }) {
+                id
+                name
+                description
+            }
+        }
+        """ % (technology_data['name'], technology_data['description'], technology_data['versionSpec'], tech_publisher_id)
+    }
+    response = requests.post(api_url, headers=headers, json=mutation)
+    return response.json()
 
-        # Redirect to authorization URL for OAuth
-        auth_url = f"{authorization_url}?response_type=code&client_id={client_id}&redirect_uri={redirect_uri}&scope={scope}&code_challenge={code_challenge}&code_challenge_method=S256"
-        return redirect(auth_url)
-
-# GraphQL API using Ariadne
-query = QueryType()
-mutation = MutationType()
-
-# Define the hello query
-@query.field("hello")
-def resolve_hello(_, info, name="stranger"):
-    return f"Hello, {name}!"
-
-# Define the createItem mutation
-@mutation.field("createItem")
-def resolve_create_item(_, info, name):
-    # Add logic to handle item creation (e.g., saving to a database)
-    return {
-        "success": True,
-        "message": f"Item '{name}' created successfully!"
+# Main function to process the Excel file and create technologies
+def main():
+    # Configuration
+    excel_file_path = 'technologies.xlsx'  # Path to your Excel file
+    api_url = 'https://your-graphql-endpoint.com/graphql'  # Replace with your GraphQL endpoint
+    headers = {
+        'Authorization': 'Bearer YOUR_ACCESS_TOKEN',  # Replace with your OAuth token
+        'Content-Type': 'application/json'
     }
 
-# Load the GraphQL schema from string (could be from a `.graphql` file)
-type_defs = """
-    type Query {
-        hello(name: String): String
-    }
+    # Load the Excel data
+    technologies = load_excel(excel_file_path)
 
-    type Mutation {
-        createItem(name: String!): CreateItemResponse
-    }
+    # Process each technology and create it using the GraphQL API
+    for technology in technologies:
+        tech_publisher_id = get_tech_publisher_id(technology['publisherName'], api_url, headers)
+        if not tech_publisher_id:
+            print(f"Tech publisher not found for: {technology['publisherName']}, creating new tech publisher.")
+            tech_publisher_id = create_tech_publisher(technology['publisherName'], api_url, headers)
+        
+        if tech_publisher_id:
+            response = create_technology(technology, tech_publisher_id, api_url, headers)
+            print(response)
+        else:
+            print(f"Failed to create tech publisher for: {technology['publisherName']}")
 
-    type CreateItemResponse {
-        success: Boolean!
-        message: String!
-    }
-"""
-
-# Create the executable schema
-schema = make_executable_schema(type_defs, query, mutation)
-
-# Set up GraphQL endpoint
-@app.route("/graphql", methods=["GET"])
-def graphql_playground():
-    return PLAYGROUND_HTML, 200
-
-@app.route("/graphql", methods=["POST"])
-def graphql_server():
-    data = request.get_json()
-    success, result = graphql_sync(
-        schema,
-        data,
-        context_value=request,
-        debug=app.debug
-    )
-    status_code = 200 if success else 400
-    return jsonify(result), status_code
-
-# Run the server on HTTPS (localhost:8010)
-if __name__ == '__main__':
-    app.run(ssl_context=('cert.pem', 'key.pem'), port=8010)
+if __name__ == "__main__":
+    main()
