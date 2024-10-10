@@ -71,7 +71,7 @@ def create_tech_publisher(publisher_name, api_url, headers):
         mutation createTechPublisher {
             createTechPublisher(request: {
                 name: \"%s\"
-                description: \"N/A\"
+                description: "N/A"
             }) {
                 id
                 name
@@ -109,10 +109,12 @@ def create_technology(technology_data, tech_publisher_id, api_url, headers):
 def main():
     # Configuration
     excel_file_path = 'technologies.xlsx'  # Path to your Excel file
-    api_url = 'https://your-graphql-endpoint.com/graphql'  # Replace with your GraphQL endpoint
+    api_url = 'https://tcgapi.qa1.tcgapi.aks.aze1.cloud.geico.net/graphql'  # Replace with your GraphQL endpoint
     headers = {
         'Authorization': 'Bearer YOUR_ACCESS_TOKEN',  # Replace with your OAuth token
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Referer': 'https://tcgapi.qa1.tcgapi.aks.aze1.cloud.geico.net/graphql/playground/static/js/document.9be0c561.chunk.js',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
     }
 
     # Load the Excel data
