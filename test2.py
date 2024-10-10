@@ -90,8 +90,8 @@ class AuthorizationHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"<html><body><h1>Authorization failed or canceled.</h1></body></html>")
 
-# Step 6: Run the server to handle redirect URI
 server_address = ('', 8010)
 httpd = HTTPServer(server_address, AuthorizationHandler)
-print('Starting server on http://localhost:8010...')
+httpd.socket = ssl.wrap_socket(httpd.socket, certfile='./server.pem', server_side=True)
+print('Starting HTTPS server on https://localhost:8010...')
 httpd.serve_forever()
