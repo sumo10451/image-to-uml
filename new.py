@@ -1,6 +1,6 @@
-from flask import Flask, request, redirect, jsonify
-from flask_graphql import GraphQLView
-import graphene
+from flask import Flask, request, jsonify, redirect
+from ariadne import QueryType, MutationType, make_executable_schema, graphql_sync, load_schema_from_path
+from ariadne.constants import PLAYGROUND_HTML
 import base64
 import hashlib
 import os
@@ -17,7 +17,7 @@ client_secret = 'your_client_secret'  # if applicable
 # Flask app setup
 app = Flask(__name__)
 
-# PKCE variables (will be generated dynamically)
+# PKCE variables
 code_verifier = ''
 code_challenge = ''
 
@@ -70,38 +70,59 @@ def callback():
 
     return f"Access token: {access_token}"
 
-# GraphQL API using Graphene
-class Query(graphene.ObjectType):
-    hello = graphene.String(name=graphene.String(default_value="stranger"))
+# GraphQL API using Ariadne
+query = QueryType()
+mutation = MutationType()
 
-    def resolve_hello(self, info, name):
-        return f'Hello {name}!'
+# Define the hello query
+@query.field("hello")
+def resolve_hello(_, info, name="stranger"):
+    return f"Hello, {name}!"
 
-class CreateItem(graphene.Mutation):
-    class Arguments:
-        name = graphene.String(required=True)
-    
-    success = graphene.Boolean()
-    message = graphene.String()
+# Define the createItem mutation
+@mutation.field("createItem")
+def resolve_create_item(_, info, name):
+    # Add logic to handle item creation (e.g., saving to a database)
+    return {
+        "success": True,
+        "message": f"Item '{name}' created successfully!"
+    }
 
-    def mutate(self, info, name):
-        # Here you would handle adding an item (e.g., saving it to a DB)
-        return CreateItem(success=True, message=f"Item '{name}' created successfully!")
+# Load the GraphQL schema from string (could be from a `.graphql` file)
+type_defs = """
+    type Query {
+        hello(name: String): String
+    }
 
-class Mutation(graphene.ObjectType):
-    create_item = CreateItem.Field()
+    type Mutation {
+        createItem(name: String!): CreateItemResponse
+    }
 
-schema = graphene.Schema(query=Query, mutation=Mutation)
+    type CreateItemResponse {
+        success: Boolean!
+        message: String!
+    }
+"""
 
-# Adding GraphQL endpoint
-app.add_url_rule(
-    '/graphql',
-    view_func=GraphQLView.as_view(
-        'graphql',
-        schema=schema,
-        graphiql=True  # Enable the GraphiQL interface
+# Create the executable schema
+schema = make_executable_schema(type_defs, query, mutation)
+
+# Set up GraphQL endpoint
+@app.route("/graphql", methods=["GET"])
+def graphql_playground():
+    return PLAYGROUND_HTML, 200
+
+@app.route("/graphql", methods=["POST"])
+def graphql_server():
+    data = request.get_json()
+    success, result = graphql_sync(
+        schema,
+        data,
+        context_value=request,
+        debug=app.debug
     )
-)
+    status_code = 200 if success else 400
+    return jsonify(result), status_code
 
 # Step 5: Run the server on HTTPS (localhost:8010)
 if __name__ == '__main__':
