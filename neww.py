@@ -11,8 +11,11 @@ import os
 # Configuration and Setup
 # -------------------------------
 
-# Set your OpenAI API key
-openai.api_key = 'YOUR_OPENAI_API_KEY'
+# Azure OpenAI Configuration
+AZURE_OPENAI_ENDPOINT = 'https://<your-resource-name>.openai.azure.com/'  # Replace with your Azure OpenAI endpoint
+AZURE_OPENAI_KEY = 'YOUR_AZURE_OPENAI_KEY'  # Replace with your Azure OpenAI API key
+AZURE_OPENAI_API_VERSION = '2023-03-15-preview'  # Replace with your Azure OpenAI API version if different
+AZURE_OPENAI_DEPLOYMENT_NAME = 'gpt-4o'  # Replace with your deployment name
 
 # Path to the Tesseract executable (if not in PATH)
 # Uncomment and set the correct path if needed
@@ -152,8 +155,11 @@ def find_closest_node(nodes, point):
     min_distance = float('inf')
     closest_node = None
     for node in nodes:
-        nx, ny = node['position']
-        distance = np.sqrt((nx - x)**2 + (ny - y)**2)
+        nx, ny = node['position']['x'], node['position']['y']
+        # Calculate the center of the node
+        node_center_x = nx + node['size'][0] // 2
+        node_center_y = ny + node['size'][1] // 2
+        distance = np.sqrt((node_center_x - x)**2 + (node_center_y - y)**2)
         if distance < min_distance:
             min_distance = distance
             closest_node = node
@@ -183,12 +189,12 @@ def save_topology_data(topology, output_path):
     print(f"Topology data saved to '{output_path}'.")
 
 # -------------------------------
-# GPT-4 Integration with Prompt Chaining
+# GPT-4 Integration with Prompt Chaining for Azure OpenAI
 # -------------------------------
 
 def call_gpt4(prompt, max_retries=5):
     """
-    Call GPT-4 API with retry logic for handling rate limits.
+    Call GPT-4o API on Azure with retry logic for handling rate limits.
     """
     retry_count = 0
     wait_time = 1  # Start with 1 second
@@ -196,12 +202,19 @@ def call_gpt4(prompt, max_retries=5):
     while retry_count < max_retries:
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4",
+                engine=AZURE_OPENAI_DEPLOYMENT_NAME,  # Use deployment name for Azure
                 messages=[
                     {"role": "system", "content": "You are a network topology analyst."},
                     {"role": "user", "content": prompt}
                 ],
-                timeout=30  # Optional: set a timeout for the request
+                temperature=0.7,  # Adjust as needed
+                max_tokens=1500,  # Adjust based on expected response length
+                top_p=1,
+                frequency_penalty=0,
+                presence_penalty=0,
+                api_type="azure",
+                api_base=AZURE_OPENAI_ENDPOINT,
+                api_version=AZURE_OPENAI_API_VERSION,
             )
             return response['choices'][0]['message']['content']
 
@@ -284,7 +297,8 @@ def main():
             nodes.append({
                 "id": f"Node_{idx}",
                 "label": label if label else f"Unnamed_Node_{idx}",
-                "position": {"x": x, "y": y}
+                "position": {"x": x, "y": y},
+                "size": {"width": w, "height": h}
             })
         print("Extracted node labels.")
 
@@ -307,7 +321,7 @@ def main():
         # Step 8: Save Topology Data to JSON
         save_topology_data(topology, OUTPUT_JSON)
 
-        # Step 9: Generate Descriptions with GPT-4 using Prompt Chaining
+        # Step 9: Generate Descriptions with GPT-4o using Prompt Chaining
 
         # Describe Nodes
         print("Generating node descriptions...")
