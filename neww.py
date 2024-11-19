@@ -6,10 +6,15 @@ import time
 import numpy as np
 from PIL import Image
 import os
+import logging
 
 # -------------------------------
 # Configuration and Setup
 # -------------------------------
+
+# Configure logging
+logging.basicConfig(filename='topology_analysis.log', level=logging.INFO,
+                    format='%(asctime)s %(levelname)s:%(message)s')
 
 # Azure OpenAI Configuration
 AZURE_OPENAI_ENDPOINT = 'https://<your-resource-name>.openai.azure.com/'  # Replace with your Azure OpenAI endpoint
@@ -38,6 +43,7 @@ def preprocess_image(image_path):
     """
     image = cv2.imread(image_path)
     if image is None:
+        logging.error(f"Image file '{image_path}' not found.")
         raise FileNotFoundError(f"Image file '{image_path}' not found.")
 
     # Convert to grayscale
@@ -49,6 +55,7 @@ def preprocess_image(image_path):
     # Apply thresholding to get binary image
     _, thresh = cv2.threshold(blurred, 200, 255, cv2.THRESH_BINARY_INV)
 
+    logging.info("Image preprocessed.")
     return image, gray, blurred, thresh
 
 def detect_nodes(thresh_image):
@@ -63,6 +70,7 @@ def detect_nodes(thresh_image):
         # Filter out small contours that may not be nodes
         if w > 30 and h > 30:
             nodes.append((x, y, w, h))
+    logging.info(f"Detected {len(nodes)} nodes.")
     return nodes
 
 def extract_text_from_roi(image, roi):
@@ -90,8 +98,10 @@ def detect_edges(blurred_image):
     # Detect lines using HoughLinesP
     lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, minLineLength=50, maxLineGap=10)
     if lines is not None:
+        logging.info(f"Detected {len(lines)} connections.")
         return lines.tolist()
     else:
+        logging.info("No connections detected.")
         return []
 
 def extract_arrow_direction(image, line):
@@ -126,7 +136,26 @@ def extract_connection_labels(image, lines):
             "label": label if label else "No Label",
             "direction": extract_arrow_direction(image, line)
         })
+    logging.info("Extracted connection labels.")
     return connection_labels
+
+def find_closest_node(nodes, point):
+    """
+    Find the closest node to a given point.
+    """
+    x, y = point
+    min_distance = float('inf')
+    closest_node = None
+    for node in nodes:
+        nx, ny = node['position']['x'], node['position']['y']
+        # Calculate the center of the node
+        node_center_x = nx + node['size']['width'] // 2
+        node_center_y = ny + node['size']['height'] // 2
+        distance = np.sqrt((node_center_x - x)**2 + (node_center_y - y)**2)
+        if distance < min_distance:
+            min_distance = distance
+            closest_node = node
+    return closest_node
 
 def map_connections_to_nodes(nodes, lines):
     """
@@ -145,25 +174,8 @@ def map_connections_to_nodes(nodes, lines):
             "label": "",
             "direction": "Unidirectional"  # Default value
         })
+    logging.info("Mapped connections to nodes.")
     return connections
-
-def find_closest_node(nodes, point):
-    """
-    Find the closest node to a given point.
-    """
-    x, y = point
-    min_distance = float('inf')
-    closest_node = None
-    for node in nodes:
-        nx, ny = node['position']['x'], node['position']['y']
-        # Calculate the center of the node
-        node_center_x = nx + node['size'][0] // 2
-        node_center_y = ny + node['size'][1] // 2
-        distance = np.sqrt((node_center_x - x)**2 + (node_center_y - y)**2)
-        if distance < min_distance:
-            min_distance = distance
-            closest_node = node
-    return closest_node
 
 def organize_topology_data(nodes, connections, connection_labels):
     """
@@ -178,6 +190,7 @@ def organize_topology_data(nodes, connections, connection_labels):
         "nodes": nodes,
         "edges": connections
     }
+    logging.info("Organized topology data.")
     return topology
 
 def save_topology_data(topology, output_path):
@@ -186,7 +199,7 @@ def save_topology_data(topology, output_path):
     """
     with open(output_path, 'w') as f:
         json.dump(topology, f, indent=2)
-    print(f"Topology data saved to '{output_path}'.")
+    logging.info(f"Topology data saved to '{output_path}'.")
 
 # -------------------------------
 # GPT-4 Integration with Prompt Chaining for Azure OpenAI
@@ -219,13 +232,17 @@ def call_gpt4(prompt, max_retries=5):
             return response['choices'][0]['message']['content']
 
         except openai.error.RateLimitError:
-            print(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
+            logging.warning(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
             retry_count += 1
             wait_time *= 2  # Exponential backoff
 
         except openai.error.OpenAIError as e:
-            print(f"OpenAI API error: {e}")
+            logging.error(f"OpenAI API error: {e}")
+            break
+
+        except Exception as e:
+            logging.error(f"Unexpected error: {e}")
             break
 
     raise Exception("Max retries exceeded. Please try again later.")
@@ -242,20 +259,34 @@ def describe_nodes(topology):
 
     return call_gpt4(node_descriptions)
 
-def describe_connections(topology):
+def describe_connections(topology, batch_size=100):
     """
-    Generate descriptions for each connection.
+    Generate descriptions for each connection in batches.
     """
     edges = topology['edges']
     nodes = topology['nodes']
-    connection_descriptions = "Here are the connections in my network topology:\n\n"
-    for i, edge in enumerate(edges, 1):
-        source_label = next((node['label'] for node in nodes if node['id'] == edge['source']), "Unknown")
-        target_label = next((node['label'] for node in nodes if node['id'] == edge['target']), "Unknown")
-        connection_descriptions += f"{i}. {edge['label']} from {edge['source']} ({source_label}) to {edge['target']} ({target_label})\n"
-    connection_descriptions += "\nPlease provide a detailed description of each connection, explaining the data flow and interaction between the nodes."
-
-    return call_gpt4(connection_descriptions)
+    total_connections = len(edges)
+    connection_descriptions = ""
+    
+    for i in range(0, total_connections, batch_size):
+        batch = edges[i:i+batch_size]
+        batch_descriptions = "Here are the connections in my network topology:\n\n"
+        for j, edge in enumerate(batch, 1):
+            source_label = next((node['label'] for node in nodes if node['id'] == edge['source']), "Unknown")
+            target_label = next((node['label'] for node in nodes if node['id'] == edge['target']), "Unknown")
+            batch_descriptions += f"{i + j}. {edge['label']} from {edge['source']} ({source_label}) to {edge['target']} ({target_label})\n"
+        batch_descriptions += "\nPlease provide a detailed description of each connection in this batch, explaining the data flow and interaction between the nodes."
+        
+        # Call GPT-4o for each batch
+        try:
+            batch_response = call_gpt4(batch_descriptions)
+            connection_descriptions += batch_response + "\n\n"
+            time.sleep(1)  # Optional: wait to avoid hitting rate limits
+        except Exception as e:
+            logging.error(f"An error occurred while processing connections batch starting at {i + 1}: {e}")
+            continue  # Proceed with the next batch
+    
+    return connection_descriptions
 
 def compile_report(node_desc, connection_desc):
     """
@@ -283,11 +314,9 @@ def main():
     try:
         # Step 1: Preprocess the Image
         image, gray, blurred, thresh = preprocess_image(IMAGE_PATH)
-        print("Image preprocessed.")
 
         # Step 2: Detect Nodes
         node_rects = detect_nodes(thresh)
-        print(f"Detected {len(node_rects)} nodes.")
 
         # Step 3: Extract Node Labels
         nodes = []
@@ -300,56 +329,60 @@ def main():
                 "position": {"x": x, "y": y},
                 "size": {"width": w, "height": h}
             })
-        print("Extracted node labels.")
+        logging.info("Extracted node labels.")
 
         # Step 4: Detect Connections (Edges)
         lines = detect_edges(blurred)
-        print(f"Detected {len(lines)} connections.")
 
         # Step 5: Map Connections to Nodes
         connections = map_connections_to_nodes(nodes, lines)
-        print("Mapped connections to nodes.")
 
         # Step 6: Extract Connection Labels
         connection_labels = extract_connection_labels(image, lines)
-        print("Extracted connection labels.")
 
         # Step 7: Organize Topology Data
         topology = organize_topology_data(nodes, connections, connection_labels)
-        print("Organized topology data.")
 
         # Step 8: Save Topology Data to JSON
         save_topology_data(topology, OUTPUT_JSON)
 
-        # Step 9: Generate Descriptions with GPT-4o using Prompt Chaining
+        # Step 9: Generate Descriptions with GPT-4o using Prompt Chaining with Batching
 
         # Describe Nodes
-        print("Generating node descriptions...")
+        logging.info("Generating node descriptions...")
         node_description = describe_nodes(topology)
+        logging.info("Node Descriptions:")
+        logging.info(node_description)
         print("Node Descriptions:")
         print(node_description)
         time.sleep(2)  # Optional: wait between API calls
 
-        # Describe Connections
-        print("Generating connection descriptions...")
-        connection_description = describe_connections(topology)
+        # Describe Connections with Batching
+        logging.info("Generating connection descriptions in batches...")
+        connection_description = describe_connections(topology, batch_size=100)
+        logging.info("Connection Descriptions:")
+        logging.info(connection_description)
         print("Connection Descriptions:")
         print(connection_description)
         time.sleep(2)  # Optional: wait between API calls
 
         # Compile Comprehensive Report
-        print("Compiling comprehensive report...")
+        logging.info("Compiling comprehensive report...")
         full_report = compile_report(node_description, connection_description)
+        logging.info("Comprehensive Report:")
+        logging.info(full_report)
         print("Comprehensive Report:")
         print(full_report)
 
         # Optionally, save the report to a file
         with open('topology_report.txt', 'w') as report_file:
             report_file.write(full_report)
+        logging.info("Report saved to 'topology_report.txt'.")
         print("Report saved to 'topology_report.txt'.")
 
     except Exception as e:
+        logging.error(f"An error occurred: {e}")
         print(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    main()
+        main()
