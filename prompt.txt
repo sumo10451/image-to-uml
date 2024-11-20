@@ -1,0 +1,48 @@
+As a Senior Solution Architect, analyze the provided section of the architecture diagram to support the threat modeling of the system. Please perform the following for this specific section:
+
+1. **Identify All Objects and Connections:**
+   - List every object (e.g., services, databases, components) visible in this section.
+   - For each object, note any metadata or attributes associated with it.
+
+2. **Detail Every Connection:**
+   - For each connection in this section, specify:
+     - The source and destination objects.
+     - The directionality of the connection:
+       - Unidirectional: `-->` or `<--`
+       - Bidirectional: `<-->`
+     - Any relevant metadata, protocols, or technologies used (e.g., `uses HTTPS/TLS1.2`).
+   - Mention if objects have multiple connections.
+
+3. **Categorize Objects by Boundaries:**
+   - Identify any boundaries present in this section (e.g., `Azure Cloud`, `On-Premise`, `Trusted`, `Semi-Trusted`, `Untrusted`).
+   - Categorize each object according to its boundary.
+   - Group the connections based on the boundaries of the objects they connect.
+
+4. **List Leftover Connections:**
+   - Identify any connections not previously mentioned within this section.
+   - Ensure no connections are omitted from your description.
+
+5. **Provide a Structured Explanation:**
+   - Present the information clearly and professionally, suitable for discussion with a Security Architect.
+   - Use the following format for consistency:
+
+**Format:**
+
+- **Objects and Boundaries:**
+  - *Boundary Name*:
+    - *Trust Level*:
+      - Object 1
+      - Object 2
+      - ...
+
+- **Connections:**
+  1. *Connection Number*: `Source Object Direction Destination Object` uses `Protocol/Metadata`
+     - Example: `1. Azure Cosmos DB --> Kubernetes Cluster uses HTTPS/TLS1.2`
+
+- **Leftover Connections:**
+  - List any additional connections here.
+
+6. **Important Instructions:**
+   - Do not include introductory or concluding phrases; start directly with the explanation.
+   - Do not infer or assume information not explicitly shown in this section of the diagram.
+   - Only describe elements and connections that are directly visible.
