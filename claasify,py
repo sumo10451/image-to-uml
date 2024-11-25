@@ -1,0 +1,56 @@
+import csv
+import openai
+
+# Set your OpenAI API key
+openai.api_key = 'YOUR_API_KEY'
+
+# Paths to your CSV file and image file
+csv_file_path = 'components.csv'
+image_file_path = 'topology_image.png'
+
+# Read the components from the CSV file
+components = []
+with open(csv_file_path, mode='r', newline='') as csvfile:
+    reader = csv.DictReader(csvfile)
+    for row in reader:
+        components.append(row['component'])
+
+# Function to validate component using GPT-4 with image capabilities
+def validate_component(component, image_file_path):
+    prompt = f"""
+You are an AI assistant that analyzes network topology images.
+
+Given the topology image and the component name '{component}', please:
+
+1. Confirm if the component '{component}' is present in the image.
+2. Identify if it is an object that performs an action (e.g., database, server, cluster, service).
+3. Specify if the component is connected to any other components, and list them.
+4. Provide a brief description of the component's role in the topology.
+
+Provide the answer in the following JSON format:
+
+{{
+    "component": "{component}",
+    "present_in_image": true or false,
+    "type": "Type of the component (e.g., database, server, etc.)",
+    "connected_components": ["List", "of", "connected", "components"],
+    "description": "Brief description of the component's role"
+}}
+"""
+    # Send the prompt and image to GPT-4
+    response = openai.ChatCompletion.create(
+        model="gpt-4-vision",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant that can analyze images."},
+            {"role": "user", "content": prompt}
+        ],
+        files=[
+            {"name": "topology_image.png", "content": open(image_file_path, "rb").read()}
+        ]
+    )
+    return response['choices'][0]['message']['content']
+
+# Iterate over components and validate them
+for component in components:
+    result = validate_component(component, image_file_path)
+    print(result)
